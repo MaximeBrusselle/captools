@@ -1,0 +1,22 @@
+{
+	"name": "captools",
+	"version": "1.0.0",
+	"main": "index.js",
+	"scripts": {
+		"run": "node .",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"type": "module",
+	"description": "",
+	"bin": {
+		"captools": "index.js"
+	},
+	"dependencies": {
+		"@sap/cds": "^9.4.4",
+		"chalk": "^5.6.2",
+		"inquirer": "^13.0.1"
+	}
+}
