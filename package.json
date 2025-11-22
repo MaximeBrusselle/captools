@@ -6,10 +6,10 @@
 		"run": "node ."
 	},
 	"keywords": [],
-	"author": "",
+	"author": "Maxime Brusselle <maxime.brusselle@gmail.com>",
 	"license": "ISC",
 	"type": "module",
-	"description": "",
+	"description": "A set of tools for SAP CAP development",
 	"bin": {
 		"captools": "index.js"
 	},
