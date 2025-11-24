@@ -2,6 +2,13 @@ import fs from "fs";
 import path from "path";
 import chalk from "chalk";
 
+/**
+ * Determines the next version directory for generated inserts.
+ *
+ * @private
+ * @param {string} outputDir - The base directory where inserts are stored.
+ * @returns {string} - The next version string (e.g., "v1", "v2").
+ */
 function getNextVersion(outputDir) {
 	if (!fs.existsSync(outputDir)) {
 		return "v1";
@@ -14,10 +21,64 @@ function getNextVersion(outputDir) {
 	return `v${maxVersion + 1}`;
 }
 
+/**
+ * Parses a CSV line into an array of fields, handling quoted values and escaped quotes.
+ *
+ * @private
+ * @param {string} line - The CSV line to parse.
+ * @param {string} delimiter - The delimiter character (e.g., "," or ";").
+ * @returns {string[]} - An array of field values.
+ */
+function parseCSVLine(line, delimiter) {
+	const result = [];
+	let current = "";
+	let inQuotes = false;
+
+	for (let i = 0; i < line.length; i++) {
+		const char = line[i];
+
+		if (char === '"') {
+			if (inQuotes && line[i + 1] === '"') {
+				// Handle escaped quotes (double quotes)
+				current += '"';
+				i++; // Skip the next quote
+			} else {
+				// Toggle quote state
+				inQuotes = !inQuotes;
+			}
+		} else if (char === delimiter && !inQuotes) {
+			// End of field
+			result.push(current);
+			current = "";
+		} else {
+			current += char;
+		}
+	}
+
+	// Add the last field
+	result.push(current);
+
+	return result;
+}
+
+/**
+ * Generates SQL INSERT statements for SAP HANA.
+ *
+ * @public
+ * @param {string} filePath - The path to the CSV file.
+ * @throws {Error} - Throws an error if not implemented.
+ */
 export function createHanaInserts(filePath) {
 	throw new Error("Not implemented yet");
 }
 
+/**
+ * Generates SQL INSERT statements for PostgreSQL from a CSV file.
+ *
+ * @public
+ * @param {string} filePath - The path to the CSV file.
+ * @returns {string} - The generated SQL INSERT statements.
+ */
 export function createPostgresInserts(filePath) {
 	const filename = path.basename(filePath, ".csv");
 	// Tablename from filename: replace hyphens with underscores and lowercase
@@ -32,17 +93,17 @@ export function createPostgresInserts(filePath) {
 	const firstLine = lines[0];
 	const delimiter = firstLine.includes(";") ? ";" : ",";
 
-	// Headers: lowercase and trimmed
-	const headers = firstLine.split(delimiter).map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
+	// Headers: parse with proper CSV handling, then lowercase and trim
+	const rawHeaders = parseCSVLine(firstLine, delimiter);
+	const headers = rawHeaders.map((h) => h.trim().toLowerCase());
 
 	const values = [];
 
 	for (let i = 1; i < lines.length; i++) {
 		const line = lines[i];
 
-		// Basic CSV splitting (Note: This assumes no delimiters inside values)
-		// We support quoted values by stripping the quotes, but complex CSV parsing is limited without a library.
-		const rawValues = line.split(delimiter);
+		// Parse CSV line properly handling quoted values with commas
+		const rawValues = parseCSVLine(line, delimiter);
 
 		// Pad with empty strings if row is shorter than headers
 		if (rawValues.length < headers.length) {
@@ -54,11 +115,6 @@ export function createPostgresInserts(filePath) {
 
 		const row = rawValues.map((val) => {
 			let v = val.trim();
-
-			// Remove surrounding quotes if present
-			if (v.startsWith('"') && v.endsWith('"')) {
-				v = v.slice(1, -1);
-			}
 
 			// Handle NULLs (empty or explicit NULL)
 			if (v === "" || v.toUpperCase() === "NULL") {
@@ -82,6 +138,15 @@ export function createPostgresInserts(filePath) {
 	return sql;
 }
 
+/**
+ * Generates SQL INSERT statements for all CSV files in standard locations.
+ *
+ * @public
+ * @async
+ * @param {string} targetDb - The target database ("postgres" or "hana").
+ * @param {number} [traceLevel=0] - The level of output detail.
+ * @returns {Promise<void>} - A promise that resolves when generation is complete.
+ */
 export async function generateInserts(targetDb, traceLevel = 0) {
 	console.log(chalk.blue(`\n🚀 Generating ${targetDb} inserts...`));
 

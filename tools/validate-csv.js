@@ -3,6 +3,13 @@ import fs from "fs";
 import path from "path";
 import chalk from "chalk";
 
+/**
+ * Reads the header row from a CSV file.
+ *
+ * @private
+ * @param {string} filePath - The path to the CSV file.
+ * @returns {string[]} - An array of header names, or an empty array if reading fails.
+ */
 function getCsvHeaders(filePath) {
 	try {
 		const content = fs.readFileSync(filePath, "utf-8");
@@ -15,6 +22,16 @@ function getCsvHeaders(filePath) {
 	}
 }
 
+/**
+ * Validates the header row of a CSV file against the CDS entity definition.
+ *
+ * @private
+ * @param {string} filePath - The path to the CSV file.
+ * @param {string} entityName - The name of the CDS entity.
+ * @param {object} csn - The compiled CDS model (CSN).
+ * @param {number} traceLevel - The level of output detail.
+ * @returns {{hasErrors: boolean, hasWarnings: boolean}} - The validation result.
+ */
 function validateHeaderRow(filePath, entityName, csn, traceLevel) {
 	const def = csn.definitions[entityName];
 	if (!def) return false;
@@ -70,23 +87,21 @@ function validateHeaderRow(filePath, entityName, csn, traceLevel) {
 	const extra = headers.filter((h) => {
 		// Skip managed fields
 		if (managedFields.includes(h)) return false;
-		
+
 		// Check if it's in expected columns
 		if (expected.includes(h)) return false;
-		
+
 		// Check if it's a foreign key pattern (column_id) that might match an association
 		if (h.includes("_")) {
 			const [baseName, keyName] = h.split("_");
 			const element = def.elements[baseName];
-			
+
 			// If there's a to-one association with this base name, it's valid
-			if (element && 
-				(element.type === "cds.Association" || element.type === "cds.Composition") &&
-				(!element.cardinality || element.cardinality.max !== "*")) {
+			if (element && (element.type === "cds.Association" || element.type === "cds.Composition") && (!element.cardinality || element.cardinality.max !== "*")) {
 				return false; // Not extra - it's a valid foreign key
 			}
 		}
-		
+
 		// Check if it matches a property name with different casing
 		const lowerH = h.toLowerCase();
 		for (const name in def.elements) {
@@ -94,11 +109,11 @@ function validateHeaderRow(filePath, entityName, csn, traceLevel) {
 				return false; // Not extra - it's a case mismatch
 			}
 		}
-		
+
 		return true; // It's truly extra
 	});
 
-	// Report errors for extra columns (trace level 0+)
+	// Report errors for extra columns (always shown - trace level 0+)
 	if (extra.length > 0) {
 		console.error(chalk.red(`❌ HEADER ERROR: Entity [${entityName}]`));
 		console.error(chalk.red(`    File: ${path.basename(filePath)}`));
@@ -107,7 +122,7 @@ function validateHeaderRow(filePath, entityName, csn, traceLevel) {
 		hasErrors = true;
 	}
 
-	// Report errors for missing key columns (trace level 0+)
+	// Report errors for missing key columns (always shown - trace level 0+)
 	if (missingKeys.length > 0) {
 		console.error(chalk.red(`❌ HEADER ERROR: Entity [${entityName}]`));
 		console.error(chalk.red(`    File: ${path.basename(filePath)}`));
@@ -135,6 +150,14 @@ function validateHeaderRow(filePath, entityName, csn, traceLevel) {
 	return { hasErrors, hasWarnings };
 }
 
+/**
+ * Validates that CSV filenames match the CDS entity names.
+ *
+ * @public
+ * @async
+ * @param {number} traceLevel - The level of output detail.
+ * @returns {Promise<void>} - A promise that resolves when validation is complete.
+ */
 export async function validateCsvFilenames(traceLevel) {
 	console.log("🔍 Loading CDS model for filename validation...");
 	const csn = await cds.load("*");
@@ -174,44 +197,83 @@ export async function validateCsvFilenames(traceLevel) {
 		})
 		.sort();
 
-	for (let name of entities) {
-		const def = csn.definitions[name];
+	// Create a lowercase lookup map for entity names
+	const entityLookup = {};
+	entities.forEach((name) => {
+		entityLookup[name.toLowerCase()] = name;
+	});
 
-		// 1. Calculate the Strict Requirement
-		// Namespace dots become hyphens. Underscores remain underscores.
-		const strictName = name.replace(/\./g, "-") + ".csv";
-		const strictNameLower = strictName.toLowerCase();
+	for (let diskFile of diskFiles) {
+		// Extract entity name from filename (remove .csv extension)
+		const fileBaseName = diskFile.actualName.replace(/\.csv$/i, "");
 
-		// 2. Look for matches
-		const exactMatch = diskFiles.find((f) => f.actualName === strictName);
-		const caseMatch = diskFiles.find((f) => f.lowerName === strictNameLower);
-
-		// 3. Look for "Lazy" matches (missing namespace)
-		const shortName = name.split(".").pop() + ".csv"; // e.g., ProductGroup.csv
-		const lazyMatch = diskFiles.find((f) => f.lowerName === shortName.toLowerCase());
-
-		// Report issues based on trace level
-		if (caseMatch && !exactMatch) {
-			// Case mismatch warning (trace level 1+)
+		// Check if this looks like a function/action CSV (contains a dot in the name)
+		if (fileBaseName.includes(".")) {
+			// Only show function/action warnings at trace level 1+
 			if (traceLevel >= 1) {
-				console.warn(chalk.yellow(`⚠️  CASE MISMATCH: Entity [${name}]`));
+				console.warn(chalk.yellow(`⚠️  FUNCTION/ACTION CSV: File [${diskFile.actualName}]`));
+				console.warn(chalk.yellow(`    Entity: ${fileBaseName}`));
+				console.warn(chalk.yellow(`    👉 This appears to be a function/action, not an entity. CSV files should not exist for functions/actions.\n`));
+			}
+			warnings++;
+			continue;
+		}
+
+		// Convert hyphens back to dots for entity lookup
+		const entityNameFromFile = fileBaseName.replace(/-/g, ".");
+		const entityNameLower = entityNameFromFile.toLowerCase();
+
+		// Check if entity exists (case-insensitive)
+		const correctEntityName = entityLookup[entityNameLower];
+
+		if (!correctEntityName) {
+			// Always show entity not found errors (trace level 0+)
+			console.error(chalk.red(`❌ ENTITY NOT FOUND: File [${diskFile.actualName}]`));
+			console.error(chalk.red(`    Expected entity: ${entityNameFromFile}`));
+			console.error(chalk.red(`    👉 No matching entity found in schema. Check for typos.\n`));
+			errors++;
+			continue;
+		}
+
+		// Entity exists - now check for exact match
+		const strictName = correctEntityName.replace(/\./g, "-") + ".csv";
+
+		if (diskFile.actualName === strictName) {
+			// Perfect match (trace level 2)
+			if (traceLevel >= 2) {
+				console.log(chalk.green(`✅ FILENAME OK: Entity [${correctEntityName}]`));
+				console.log(chalk.green(`    File: ${diskFile.actualName}`));
+				console.log(chalk.green(`    Filename matches entity name perfectly.\n`));
+			}
+		} else if (entityNameFromFile !== correctEntityName) {
+			// Case mismatch in entity name - this is an error (always shown - trace level 0+)
+			console.error(chalk.red(`❌ ENTITY CASE ERROR: File [${diskFile.actualName}]`));
+			console.error(chalk.red(`    File entity: ${entityNameFromFile}`));
+			console.error(chalk.red(`    Schema entity: ${correctEntityName}`));
+			console.error(chalk.red(`    Expected filename: ${strictName}`));
+			console.error(chalk.red(`    👉 Entity name case must match exactly.\n`));
+			errors++;
+		} else {
+			// Just a filename case mismatch (trace level 1+)
+			if (traceLevel >= 1) {
+				console.warn(chalk.yellow(`⚠️  CASE MISMATCH: Entity [${correctEntityName}]`));
 				console.warn(chalk.yellow(`    Expects: ${strictName}`));
-				console.warn(chalk.yellow(`    Found:   ${caseMatch.actualName}`));
+				console.warn(chalk.yellow(`    Found:   ${diskFile.actualName}`));
 				console.warn(chalk.yellow(`    👉 Rename the file to match the entity casing exactly.\n`));
 			}
 			warnings++;
-		} else if (lazyMatch && !exactMatch && !caseMatch) {
-			// Namespace error (trace level 0+)
-			console.error(chalk.red(`❌ NAMESPACE ERROR: Entity [${name}]`));
-			console.error(chalk.red(`    Expects: ${strictName}`));
-			console.error(chalk.red(`    Found:   ${lazyMatch.actualName}`));
-			console.error(chalk.red(`    👉 You MUST prefix the filename with the namespace.\n`));
-			errors++;
-		} else if (exactMatch && traceLevel >= 2) {
-			// Perfect match (trace level 2)
-			console.log(chalk.green(`✅ FILENAME OK: Entity [${name}]`));
-			console.log(chalk.green(`    File: ${exactMatch.actualName}`));
-			console.log(chalk.green(`    Filename matches entity name perfectly.\n`));
+		}
+	}
+
+	// Also check for missing CSV files for entities (trace level 2)
+	for (let entityName of entities) {
+		const strictName = entityName.replace(/\./g, "-") + ".csv";
+		const hasFile = diskFiles.some((f) => f.actualName === strictName);
+
+		if (!hasFile && traceLevel >= 2) {
+			console.log(chalk.blue(`ℹ️  NO CSV: Entity [${entityName}]`));
+			console.log(chalk.blue(`    Expected file: ${strictName}`));
+			console.log(chalk.blue(`    👉 No CSV file found for this entity.\n`));
 		}
 	}
 
@@ -223,6 +285,14 @@ export async function validateCsvFilenames(traceLevel) {
 	}
 }
 
+/**
+ * Validates that CSV headers match the CDS entity definitions.
+ *
+ * @public
+ * @async
+ * @param {number} traceLevel - The level of output detail.
+ * @returns {Promise<void>} - A promise that resolves when validation is complete.
+ */
 export async function validateCsvHeaders(traceLevel) {
 	console.log("🔍 Loading CDS model for header validation...");
 	const csn = await cds.load("*");
@@ -284,6 +354,14 @@ export async function validateCsvHeaders(traceLevel) {
 	}
 }
 
+/**
+ * Runs both filename and header validation for CSV files.
+ *
+ * @public
+ * @async
+ * @param {number} traceLevel - The level of output detail.
+ * @returns {Promise<void>} - A promise that resolves when validation is complete.
+ */
 export async function validateCsvs(traceLevel) {
 	await validateCsvFilenames(traceLevel);
 	console.log("");
