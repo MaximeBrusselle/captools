@@ -1,5 +1,12 @@
 #!/usr/bin/env node
 
+/**
+ * @fileoverview Main entry point for the captools CLI.
+ * Parses command line arguments and invokes the appropriate tools for
+ * CSV validation, SQL generation, or deployment configuration checks.
+ * Supports both interactive mode (inquirer) and direct command execution.
+ */
+
 import chalk from "chalk";
 import inquirer from "inquirer";
 

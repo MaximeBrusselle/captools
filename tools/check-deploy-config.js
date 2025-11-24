@@ -2,6 +2,15 @@ import fs from "fs";
 import path from "path";
 import chalk from "chalk";
 
+/**
+ * Checks the deployment configuration for SAP CAP projects.
+ * Validates app structure, manifest.json, ui5.yaml, ui5-deploy.yaml, and mta.yaml.
+ *
+ * @public
+ * @async
+ * @param {number} [traceLevel=1] - The level of output detail (0=errors only, 1=errors+warnings, 2=verbose).
+ * @returns {Promise<void>} - A promise that resolves when the check is complete.
+ */
 export default async function checkDeployConfig(traceLevel = 1) {
 	console.log("🔍 Checking deployment configuration...");
 
